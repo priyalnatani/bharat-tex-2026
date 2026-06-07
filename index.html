@@ -172,27 +172,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--text);
 .selw select{padding-right:26px;}
 .r2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
 
-.ppair{
-    display:flex;
-    gap:6px;
-    align-items:center;
-}
-
-.ppair input{
-    width:auto !important;
-}
-
-#phone{
-    flex:1 !important;
-    width:auto !important;
-}
-
-.pcode{
-    width:15px !important;
-    flex:0 0 35px !important;
-    padding:9px 3px !important;
-}
-.pcode:focus{outline:none;border-color:var(--purple);box-shadow:0 0 0 3px rgba(106,0,128,.1);}
+.phone-wrap{position:relative;display:flex;align-items:center;}
+.phone-prefix{position:absolute;left:12px;font-size:12.5px;color:var(--muted);font-weight:600;pointer-events:none;user-select:none;z-index:1;}
+#phone{padding-left:42px !important;width:100%;}
 
 .consent{background:linear-gradient(135deg,#fff8ff,#fff0f5);border:1px solid #f0d0e8;border-radius:10px;padding:10px 12px;display:flex;gap:9px;align-items:flex-start;margin:10px 0 12px;}
 .consent input[type=checkbox]{width:15px;height:15px;margin-top:2px;flex-shrink:0;accent-color:var(--purple);cursor:pointer;}
@@ -488,9 +470,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--text);
         <div class="r2">
           <div class="field" id="f-phone">
             <label>Phone <span class="req">*</span></label>
-            <div class="ppair">
-              <input class="pcode" type="text" id="phoneCode" value="+91" maxlength="5"/>
-              <input type="tel" id="phone" placeholder="9876543210" maxlength="10" autocomplete="tel" style="flex:1"/>
+            <div class="phone-wrap">
+              <span class="phone-prefix">+91</span>
+              <input type="tel" id="phone" placeholder="9876543210" maxlength="10" autocomplete="tel"/>
             </div>
             <div class="ferr">Enter valid 10-digit number.</div>
           </div>
@@ -609,27 +591,26 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--text);
 </div><!-- /page-body -->
 
 <script>
-/* ─── GOOGLE FORM CONFIG ─────────────────────────────────────────── */
-const GF_ACTION = 'https://docs.google.com/forms/d/e/1FAIpQLSfQoJHzLB0-Ugiw95ben3iSL1H2k5YvnIL0_IM6ov7oLUvFDg/formResponse';
-const GF_FIELDS = {
-  visitorType : 'entry.2024576151',
-  sector      : 'entry.1883582836',
-  state       : 'entry.2123495805',
-  interest    : 'entry.1323215900',
-  fullName    : 'entry.1854644278',
-  phone       : 'entry.564021009',
-  email       : 'entry.894429809',
-  company     : 'entry.250077512',
-  designation : 'entry.579305059',
-  city        : 'entry.912110624',
-  consent     : 'entry.1842627375',
-};
+/* ─── CONFIG ─────────────────────────────────────────────────────── */
+// Your Vercel API endpoint (form submissions → Google Sheet)
+const SUBMIT_API = '/api/submit';
+
+// Your Google Apps Script tracker URL (visitor tracking only)
+// IMPORTANT: Update this with your NEW Apps Script URL after redeployment
 
 /* ─── VISITOR TRACKER ────────────────────────────────────────────── */
-const TRACKER_URL = 'https://script.google.com/macros/s/AKfycbzCft2p4Sr9eGUN-aEpgL8Q1ilpdwEHbh8qUZpGHmPVTFOWnPdaknbE0Y8iGlJdkqIEcQ/exec';
+// IMPORTANT: Replace with your NEW Apps Script deployment URL
+const TRACKER_URL = 'https://script.google.com/macros/s/AKfycbwiIblU0Ox-1JlUbPZFSce9devX6zdr9OvHsPZVQTm1npZXtgQa4j_gNtX-4eOXFS7h_g/exec';
+
+// Only track visitors from Vercel (not local file opens)
+var _isVercel = window.location.hostname !== '' &&
+                window.location.protocol !== 'file:' &&
+                !window.location.hostname.includes('localhost') &&
+                !window.location.hostname.includes('127.0.0.1');
 
 function sendEvent(eventType, extra) {
-  // Build data object
+  if (!_isVercel) return; // ← skip tracking for local file opens
+
   var data = {
     event     : eventType,
     timestamp : new Date().toISOString(),
@@ -643,30 +624,25 @@ function sendEvent(eventType, extra) {
     Object.keys(extra).forEach(function(k) { data[k] = extra[k]; });
   }
 
-  // Encode as URL query string — GET is the only reliable way to hit App Script cross-origin
   var qs = Object.keys(data).map(function(k) {
     return encodeURIComponent(k) + '=' + encodeURIComponent(data[k]);
   }).join('&');
 
   var url = TRACKER_URL + '?' + qs;
-
-  // Primary: Image pixel — zero CORS issues, works on page unload
   try { new Image().src = url; } catch(e) {}
-
-  // Secondary: no-cors fetch
   try { fetch(url, { mode: 'no-cors' }).catch(function(){}); } catch(e) {}
 }
 
-// 1. page_view — fires immediately
+// 1. page_view — fires once on page load (Vercel only)
 sendEvent('page_view');
 
-// 2. page_exit — fires when user closes/leaves, includes seconds spent
+// 2. page_exit (Vercel only)
 var _arrivalTime = Date.now();
 window.addEventListener('beforeunload', function() {
   sendEvent('page_exit', { timeOnPageSec: Math.round((Date.now() - _arrivalTime) / 1000) });
 });
 
-// 3. form_start — fires once on first interaction with form
+// 3. form_start — fires once on first form interaction
 var _formStarted = false;
 var _formEl = document.getElementById('regForm');
 if (_formEl) {
@@ -779,25 +755,43 @@ document.getElementById('regForm').addEventListener('submit', function(e){
     return;
   }
 
-  // Submit to Google Form
-  const fd = new FormData();
-  fd.append(GF_FIELDS.visitorType,  document.getElementById('visitorType').value);
-  fd.append(GF_FIELDS.fullName,     name.trim());
-  fd.append(GF_FIELDS.phone,        document.getElementById('phoneCode').value + phone.trim());
-  fd.append(GF_FIELDS.email,        email.trim());
-  fd.append(GF_FIELDS.company,      company.trim());
-  fd.append(GF_FIELDS.designation,  document.getElementById('designation').value.trim());
-  fd.append(GF_FIELDS.sector,       document.getElementById('sector').value);
-  fd.append(GF_FIELDS.city,         city.trim());
-  fd.append(GF_FIELDS.state,        state);
-  fd.append(GF_FIELDS.interest,     document.getElementById('interest').value);
-  if(document.getElementById('consent').checked){
-    fd.append(GF_FIELDS.consent, 'I agree to receive the 15% JustDial subscription discount offer');
-  }
+  // Collect form data
+  const payload = {
+    visitorType : document.getElementById('visitorType').value,
+    fullName    : name.trim(),
+    phone       : '+91' + phone.trim(),
+    email       : email.trim(),
+    company     : company.trim(),
+    designation : document.getElementById('designation').value.trim(),
+    sector      : document.getElementById('sector').value,
+    city        : city.trim(),
+    state       : state,
+    interest    : document.getElementById('interest').value,
+    consent     : document.getElementById('consent').checked ? 'Yes' : 'No',
+    submittedAt : new Date().toISOString(),
+    source      : window.location.href
+  };
 
-  fetch(GF_ACTION, {method:'POST', body:fd, mode:'no-cors'})
-    .then(function(){ showSuccess(); })
-    .catch(function(){ showSuccess(); });
+  // Disable button while submitting
+  const btn = document.querySelector('.btn-sub');
+  btn.disabled = true;
+  btn.textContent = 'Submitting…';
+
+  fetch(SUBMIT_API, {
+    method  : 'POST',
+    headers : { 'Content-Type': 'application/json' },
+    body    : JSON.stringify(payload)
+  })
+    .then(function(r){ return r.json(); })
+    .then(function(r){
+      if(r.success){ showSuccess(); }
+      else { throw new Error(r.error || 'Unknown error'); }
+    })
+    .catch(function(err){
+      btn.disabled = false;
+      btn.innerHTML = 'Register Now &nbsp;<span class="barrow">&#8594;</span>';
+      alert('Submission failed: ' + err.message + '\nPlease try again.');
+    });
 });
 
 function showSuccess(){
