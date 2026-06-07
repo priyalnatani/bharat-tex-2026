@@ -607,10 +607,11 @@ const GF_FIELDS = {
 };
 
 /* ─── VISITOR TRACKER ────────────────────────────────────────────── */
-const TRACKER_URL = 'https://script.google.com/macros/s/AKfycbxxdtshb2Kh1VbI-eDAdnvSil_UNo2WsS30svTI_L_CfqXBqmVRvBBrCdX_U3ickm_7RA/exec';
+const TRACKER_URL = 'https://script.google.com/macros/s/AKfycbzCft2p4Sr9eGUN-aEpgL8Q1ilpdwEHbh8qUZpGHmPVTFOWnPdaknbE0Y8iGlJdkqIEcQ/exec';
 
 function sendEvent(eventType, extra) {
-  const payload = Object.assign({
+  // Build data object
+  var data = {
     event     : eventType,
     timestamp : new Date().toISOString(),
     page      : window.location.href,
@@ -618,25 +619,35 @@ function sendEvent(eventType, extra) {
     userAgent : navigator.userAgent,
     language  : navigator.language,
     screen    : screen.width + 'x' + screen.height
-  }, extra || {});
-  const body = JSON.stringify(payload);
-  if (navigator.sendBeacon) {
-    navigator.sendBeacon(TRACKER_URL, new Blob([body], {type:'application/json'}));
-  } else {
-    fetch(TRACKER_URL, {method:'POST', body:body, mode:'no-cors'}).catch(function(){});
+  };
+  if (extra) {
+    Object.keys(extra).forEach(function(k) { data[k] = extra[k]; });
   }
+
+  // Encode as URL query string — GET is the only reliable way to hit App Script cross-origin
+  var qs = Object.keys(data).map(function(k) {
+    return encodeURIComponent(k) + '=' + encodeURIComponent(data[k]);
+  }).join('&');
+
+  var url = TRACKER_URL + '?' + qs;
+
+  // Primary: Image pixel — zero CORS issues, works on page unload
+  try { new Image().src = url; } catch(e) {}
+
+  // Secondary: no-cors fetch
+  try { fetch(url, { mode: 'no-cors' }).catch(function(){}); } catch(e) {}
 }
 
-// 1. Page view — fires immediately
+// 1. page_view — fires immediately
 sendEvent('page_view');
 
-// 2. Page exit — fires when tab is closed/navigated away, includes time on page
+// 2. page_exit — fires when user closes/leaves, includes seconds spent
 var _arrivalTime = Date.now();
 window.addEventListener('beforeunload', function() {
   sendEvent('page_exit', { timeOnPageSec: Math.round((Date.now() - _arrivalTime) / 1000) });
 });
 
-// 3. Form start — fires once when user first clicks into the form
+// 3. form_start — fires once on first interaction with form
 var _formStarted = false;
 var _formEl = document.getElementById('regForm');
 if (_formEl) {
