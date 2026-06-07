@@ -592,57 +592,83 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--text);
 
 <script>
 /* ─── CONFIG ─────────────────────────────────────────────────────── */
-// Your Vercel API endpoint (form submissions → Google Sheet)
 const SUBMIT_API = '/api/submit';
 
-// Your Google Apps Script tracker URL (visitor tracking only)
-// IMPORTANT: Update this with your NEW Apps Script URL after redeployment
+/* ─── VISITOR UUID ───────────────────────────────────────────────────
+   Generates a UUID once and persists it in localStorage so returning
+   visitors can be identified across sessions. The backend uses this to
+   upsert a single row per unique visitor (incrementing visit_count).
+────────────────────────────────────────────────────────────────────── */
+var _visitorId = (function() {
+  try {
+    var stored = localStorage.getItem('jd_vid');
+    if (stored) return stored;
+    var id = (crypto.randomUUID ? crypto.randomUUID() :
+      'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+      }));
+    localStorage.setItem('jd_vid', id);
+    return id;
+  } catch(e) { return 'unknown'; }
+})();
 
-/* ─── VISITOR TRACKER ────────────────────────────────────────────── */
-// IMPORTANT: Replace with your NEW Apps Script deployment URL
+/* ─── VISITOR TRACKER ────────────────────────────────────────────────
+   page_view → POST to /api/submit?t=visit  (upserts Visitors sheet)
+   page_exit, form_start, form_submit → fire-and-forget GET pixel to
+   Apps Script (lightweight, CORS-free).
+────────────────────────────────────────────────────────────────────── */
 const TRACKER_URL = 'https://script.google.com/macros/s/AKfycbwiIblU0Ox-1JlUbPZFSce9devX6zdr9OvHsPZVQTm1npZXtgQa4j_gNtX-4eOXFS7h_g/exec';
 
-// Only track visitors from Vercel (not local file opens)
 var _isVercel = window.location.hostname !== '' &&
                 window.location.protocol !== 'file:' &&
                 !window.location.hostname.includes('localhost') &&
                 !window.location.hostname.includes('127.0.0.1');
 
+// Sends non-view events to Apps Script via image pixel (fire-and-forget)
 function sendEvent(eventType, extra) {
-  if (!_isVercel) return; // ← skip tracking for local file opens
-
+  if (!_isVercel) return;
   var data = {
-    event     : eventType,
-    timestamp : new Date().toISOString(),
-    page      : window.location.href,
-    referrer  : document.referrer || 'direct',
-    userAgent : navigator.userAgent,
-    language  : navigator.language,
-    screen    : screen.width + 'x' + screen.height
+    event      : eventType,
+    visitor_id : _visitorId,
+    timestamp  : new Date().toISOString(),
+    page       : window.location.href,
+    referrer   : document.referrer || 'direct',
+    userAgent  : navigator.userAgent,
+    language   : navigator.language,
+    screen     : screen.width + 'x' + screen.height
   };
-  if (extra) {
-    Object.keys(extra).forEach(function(k) { data[k] = extra[k]; });
-  }
-
+  if (extra) Object.keys(extra).forEach(function(k) { data[k] = extra[k]; });
   var qs = Object.keys(data).map(function(k) {
     return encodeURIComponent(k) + '=' + encodeURIComponent(data[k]);
   }).join('&');
-
   var url = TRACKER_URL + '?' + qs;
   try { new Image().src = url; } catch(e) {}
   try { fetch(url, { mode: 'no-cors' }).catch(function(){}); } catch(e) {}
 }
 
-// 1. page_view — fires once on page load (Vercel only)
-sendEvent('page_view');
+// page_view → POST to the Vercel API for unique visitor upsert in Sheets
+(function trackPageView() {
+  if (!_isVercel) return;
+  fetch('/api/submit?t=visit', {
+    method  : 'POST',
+    headers : { 'Content-Type': 'application/json' },
+    body    : JSON.stringify({
+      visitor_id : _visitorId,
+      user_agent : navigator.userAgent,
+      referrer   : document.referrer || 'direct',
+      page       : window.location.href
+    })
+  }).catch(function() {}); // silent — never block the page
+})();
 
-// 2. page_exit (Vercel only)
+// page_exit
 var _arrivalTime = Date.now();
 window.addEventListener('beforeunload', function() {
   sendEvent('page_exit', { timeOnPageSec: Math.round((Date.now() - _arrivalTime) / 1000) });
 });
 
-// 3. form_start — fires once on first form interaction
+// form_start — fires once on first form interaction
 var _formStarted = false;
 var _formEl = document.getElementById('regForm');
 if (_formEl) {
@@ -695,19 +721,33 @@ function setErr(wrapperId, msg){
   else   { wrap.classList.remove('invalid'); }
 }
 
+// Dummy/test email addresses to reject at the frontend
+var _dummyEmails = ['test@test.com','abc@abc.com','test@gmail.com','dummy@dummy.com','example@example.com','asdf@asdf.com'];
+
 const V = {
-  fullName : function(v){ return v.trim().length < 2 ? 'Please enter your full name (min 2 chars).' : ''; },
-  phone    : function(v){
-    const d = v.trim();
-    if(!/^\d+$/.test(d))  return 'Only digits allowed.';
-    if(d.length !== 10)    return 'Phone must be exactly 10 digits.';
-    if(/^[0-4]/.test(d))   return 'Enter a valid Indian mobile number.';
+  fullName : function(v) {
+    var t = v.trim();
+    if (t.length < 2)         return 'Please enter your full name (min 2 chars).';
+    if (/^\d+$/.test(t))      return 'Name cannot be all numbers.';
     return '';
   },
-  email    : function(v){ return /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/.test(v.trim()) ? '' : 'Enter a valid email address.'; },
-  company  : function(v){ return v.trim().length < 2 ? 'Please enter your company name.' : ''; },
-  city     : function(v){ return v.trim().length < 2 ? 'Enter your city.' : ''; },
-  state    : function(v){ return v === '' ? 'Please select your state.' : ''; },
+  phone    : function(v) {
+    const d = v.trim();
+    if (!/^\d+$/.test(d))    return 'Only digits allowed.';
+    if (d.length !== 10)      return 'Phone must be exactly 10 digits.';
+    if (/^[0-4]/.test(d))    return 'Enter a valid Indian mobile number.';
+    return '';
+  },
+  email    : function(v) {
+    var t = v.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/.test(t)) return 'Enter a valid email address.';
+    if (_dummyEmails.indexOf(t) !== -1)               return 'Please use a real email address.';
+    return '';
+  },
+  company  : function(v) { return v.trim().length < 2 ? 'Please enter your company name.' : ''; },
+  city     : function(v) { return v.trim().length < 2 ? 'Enter your city.' : ''; },
+  state    : function(v) { return v === '' ? 'Please select your state.' : ''; },
+  visitorType : function(v) { return v === '' ? 'Please select your visitor type.' : ''; },
 };
 
 document.getElementById('phone').addEventListener('input', function(){
@@ -738,12 +778,12 @@ document.getElementById('regForm').addEventListener('submit', function(e){
   const state   = document.getElementById('state').value;
 
   const errs = {
-    fullName : V.fullName(name),
-    phone    : V.phone(phone),
-    email    : V.email(email),
-    company  : V.company(company),
-    city     : V.city(city),
-    state    : V.state(state),
+    fullName    : V.fullName(name),
+    phone       : V.phone(phone),
+    email       : V.email(email),
+    company     : V.company(company),
+    city        : V.city(city),
+    state       : V.state(state),
   };
 
   Object.entries(errs).forEach(function(e){ setErr(e[0], e[1]); });
@@ -755,12 +795,11 @@ document.getElementById('regForm').addEventListener('submit', function(e){
     return;
   }
 
-  // Collect form data
   const payload = {
     visitorType : document.getElementById('visitorType').value,
     fullName    : name.trim(),
     phone       : '+91' + phone.trim(),
-    email       : email.trim(),
+    email       : email.trim().toLowerCase(),
     company     : company.trim(),
     designation : document.getElementById('designation').value.trim(),
     sector      : document.getElementById('sector').value,
@@ -772,7 +811,6 @@ document.getElementById('regForm').addEventListener('submit', function(e){
     source      : window.location.href
   };
 
-  // Disable button while submitting
   const btn = document.querySelector('.btn-sub');
   btn.disabled = true;
   btn.textContent = 'Submitting…';
@@ -784,8 +822,14 @@ document.getElementById('regForm').addEventListener('submit', function(e){
   })
     .then(function(r){ return r.json(); })
     .then(function(r){
-      if(r.success){ showSuccess(); }
-      else { throw new Error(r.error || 'Unknown error'); }
+      if (r.success) {
+        showSuccess();
+      } else if (r.duplicate) {
+        // Already registered — show a friendly message, not an error alert
+        showDuplicate();
+      } else {
+        throw new Error(r.error || 'Unknown error');
+      }
     })
     .catch(function(err){
       btn.disabled = false;
@@ -795,10 +839,25 @@ document.getElementById('regForm').addEventListener('submit', function(e){
 });
 
 function showSuccess(){
-  // 4. Form submit tracker event
   sendEvent('form_submit');
   document.getElementById('formBody').style.display='none';
   document.getElementById('successWrap').style.display='flex';
+  document.querySelector('.form-col').scrollTop=0;
+}
+
+function showDuplicate(){
+  // Swap the success screen copy to reflect already-registered state
+  var wrap = document.getElementById('successWrap');
+  wrap.innerHTML =
+    '<div class="sring" style="background:linear-gradient(135deg,#1565C0,#5B0082);">&#9432;</div>' +
+    '<h3 style="color:var(--jd-blue);">Already Registered!</h3>' +
+    '<p>It looks like you\'ve already registered for <strong>Bharat Tex 2026</strong> with this name, phone, and email.<br/>Our team will be in touch shortly.</p>' +
+    '<div class="sbox">' +
+      '<div class="sbox-lbl">&#128222; Need Help?</div>' +
+      '<p>Contact us at <strong>justdial.com</strong> or reach out to the Bharat Tex helpdesk if you have questions about your registration.</p>' +
+    '</div>';
+  document.getElementById('formBody').style.display='none';
+  wrap.style.display='flex';
   document.querySelector('.form-col').scrollTop=0;
 }
 
