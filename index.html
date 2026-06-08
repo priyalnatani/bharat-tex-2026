@@ -527,15 +527,15 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--text);
             <div class="selw">
               <select id="state">
                 <option value="">Select</option>
-                <option>Andhra Pradesh</option><option>Assam</option><option>Bihar</option>
-                <option>Chandigarh</option><option>Chhattisgarh</option><option>Delhi</option>
-                <option>Goa</option><option>Gujarat</option><option>Haryana</option>
-                <option>Himachal Pradesh</option><option>Jharkhand</option><option>Karnataka</option>
-                <option>Kerala</option><option>Madhya Pradesh</option><option>Maharashtra</option>
-                <option>Manipur</option><option>Meghalaya</option><option>Odisha</option>
-                <option>Punjab</option><option>Rajasthan</option><option>Tamil Nadu</option>
-                <option>Telangana</option><option>Uttar Pradesh</option><option>Uttarakhand</option>
-                <option>West Bengal</option><option>Other</option>
+                <option value="Andhra Pradesh">Andhra Pradesh</option><option value="Assam">Assam</option><option value="Bihar">Bihar</option>
+                <option value="Chandigarh">Chandigarh</option><option value="Chhattisgarh">Chhattisgarh</option><option value="Delhi">Delhi</option>
+                <option value="Goa">Goa</option><option value="Gujarat">Gujarat</option><option value="Haryana">Haryana</option>
+                <option value="Himachal Pradesh">Himachal Pradesh</option><option value="Jharkhand">Jharkhand</option><option value="Karnataka">Karnataka</option>
+                <option value="Kerala">Kerala</option><option value="Madhya Pradesh">Madhya Pradesh</option><option value="Maharashtra">Maharashtra</option>
+                <option value="Manipur">Manipur</option><option value="Meghalaya">Meghalaya</option><option value="Odisha">Odisha</option>
+                <option value="Punjab">Punjab</option><option value="Rajasthan">Rajasthan</option><option value="Tamil Nadu">Tamil Nadu</option>
+                <option value="Telangana">Telangana</option><option value="Uttar Pradesh">Uttar Pradesh</option><option value="Uttarakhand">Uttarakhand</option>
+                <option value="West Bengal">West Bengal</option><option value="Jammu And Kashmir">Jammu And Kashmir</option><option value="Other">Other</option>
               </select>
             </div>
             <div class="ferr">Select your state.</div>
@@ -566,6 +566,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--text);
           </label>
         </div>
 
+        <div id="submitErrBanner" style="display:none;align-items:center;gap:10px;background:#fff0f3;border:1.5px solid #e91e8c;border-radius:9px;padding:11px 14px;margin-top:12px;font-size:12.5px;color:#b0003a;font-weight:600;">
+          <span style="font-size:16px;">&#9888;&#65039;</span>
+          <span id="submitErrMsg">Something went wrong. Please check your details and try again.</span>
+        </div>
         <button type="submit" class="btn-sub">
           Register Now &nbsp;<span class="barrow">&#8594;</span>
         </button>
@@ -1048,7 +1052,14 @@ document.getElementById('regForm').addEventListener('submit', function(e){
       btn.disabled = false;
       btn.innerHTML = 'Register Now &nbsp;<span class="barrow">&#8594;</span>';
       var errBanner = document.getElementById('submitErrBanner');
-      if (errBanner) { errBanner.style.display = 'flex'; setTimeout(function(){ errBanner.style.display = 'none'; }, 6000); }
+      var errMsg    = document.getElementById('submitErrMsg');
+      if (errBanner) {
+        if (errMsg) errMsg.textContent = (err && err.message && err.message !== 'Unknown error')
+          ? err.message
+          : 'Something went wrong. Please check your details and try again.';
+        errBanner.style.display = 'flex';
+        setTimeout(function(){ errBanner.style.display = 'none'; }, 8000);
+      }
     });
 });
 
