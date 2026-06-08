@@ -141,8 +141,8 @@ async function appendNewVisitor(sheetId, token, body, visitorId, now) {
     body.utm_content  || '',
   ];
 
-  const appendUrl =
-  `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/Form%20Responses!A:R:append` +
+ const appendUrl =
+  `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/Visitors!A:K:append` +
   `?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
 
   const appendRes = await fetch(appendUrl, {
