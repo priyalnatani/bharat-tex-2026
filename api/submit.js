@@ -45,7 +45,22 @@ export default async function handler(req, res) {
   try {
     const sa    = JSON.parse(saRaw);
     const token = await getAccessToken(sa);
-    const body  = req.body || {};
+
+    // Vercel serverless functions do not auto-parse JSON bodies.
+    // Manually parse the raw body string.
+    let body = {};
+    try {
+      const raw = await new Promise((resolve, reject) => {
+        let data = '';
+        req.on('data', chunk => { data += chunk; });
+        req.on('end',  ()    => resolve(data));
+        req.on('error', err  => reject(err));
+      });
+      if (raw) body = JSON.parse(raw);
+    } catch (e) {
+      // If parsing fails, body stays {}
+      console.warn('submit.js: body parse error', e.message);
+    }
 
     // 1. Validate
     const validationError = validatePayload(body);
