@@ -97,7 +97,7 @@ export default async function handler(req, res) {
     ];
 
     const appendUrl =
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/:append` +
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:append` +
       `?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
 
     // NOTE: range is specified in the request body, not the URL,
