@@ -1,11 +1,13 @@
 {
   "version": 2,
   "builds": [
-    { "src": "index.html", "use": "@vercel/static" },
-    { "src": "api/submit.js", "use": "@vercel/node" }
+    { "src": "index.html",      "use": "@vercel/static" },
+    { "src": "api/submit.js",   "use": "@vercel/node" },
+    { "src": "api/visit.js",    "use": "@vercel/node" }
   ],
   "routes": [
-    { "src": "/api/submit", "dest": "/api/submit.js" },
-    { "src": "/(.*)", "dest": "/index.html" }
+    { "src": "/api/submit",  "dest": "/api/submit.js" },
+    { "src": "/api/visit",   "dest": "/api/visit.js" },
+    { "src": "/(.*)",        "dest": "/index.html" }
   ]
 }
