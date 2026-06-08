@@ -5,8 +5,12 @@
  * POST /api/submit?t=visit  → upserts unique visitor row in "Visitors" sheet (increments visit_count on return visits)
  *
  * Required Environment Variables (set in Vercel dashboard):
- *   GOOGLE_SHEET_ID          — the spreadsheet ID from the URL
- *   GOOGLE_SERVICE_ACCOUNT   — full JSON string of the service account key
+ *   GOOGLE_SHEET_ID           — spreadsheet ID for the Form Responses sheet
+ *   GOOGLE_VISITORS_SHEET_ID  — spreadsheet ID for the Visitors sheet (can be a different Google Sheet)
+ *   GOOGLE_SERVICE_ACCOUNT    — full JSON string of the service account key
+ *
+ * Note: Share BOTH spreadsheets with the service account email (Editor access).
+ * All timestamps are stored in IST (India Standard Time, UTC+5:30).
  */
 
 export default async function handler(req, res) {
@@ -26,8 +30,9 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   try {
-    const sheetId = process.env.GOOGLE_SHEET_ID;
-    const saRaw   = process.env.GOOGLE_SERVICE_ACCOUNT;
+    const sheetId         = process.env.GOOGLE_SHEET_ID;
+    const visitorsSheetId = process.env.GOOGLE_VISITORS_SHEET_ID || process.env.GOOGLE_SHEET_ID; // fallback to same sheet
+    const saRaw           = process.env.GOOGLE_SERVICE_ACCOUNT;
     if (!sheetId || !saRaw) throw new Error('Missing GOOGLE_SHEET_ID or GOOGLE_SERVICE_ACCOUNT env vars');
 
     const sa    = JSON.parse(saRaw);
@@ -36,7 +41,7 @@ export default async function handler(req, res) {
 
     // ── VISITOR UPSERT (called with ?t=visit) ─────────────────────
     if (req.query && req.query.t === 'visit') {
-      return await handleVisitorUpsert(req, res, sheetId, token, body);
+      return await handleVisitorUpsert(req, res, visitorsSheetId, token, body);
     }
 
     // ── FORM SUBMISSION ───────────────────────────────────────────
@@ -56,7 +61,7 @@ export default async function handler(req, res) {
     // 3. Append new row — RAW mode prevents Google Sheets from
     //    auto-interpreting +91 phone numbers, dates, etc. as formulas or special types
     const row = [
-      body.submittedAt  || new Date().toISOString(),
+      body.submittedAt  || nowIST(),
       body.visitorType  || '',
       body.fullName     || '',
       body.phone        || '',
@@ -69,11 +74,16 @@ export default async function handler(req, res) {
       body.interest     || '',
       body.consent      || 'No',
       body.source       || '',
+      body.utm_source   || '',
+      body.utm_medium   || '',
+      body.utm_campaign || '',
+      body.utm_term     || '',
+      body.utm_content  || '',
     ];
 
     const appendUrl =
       `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/` +
-      `Form%20Responses!A:M:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+      `Form%20Responses!A:R:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
 
     const appendRes = await fetch(appendUrl, {
       method  : 'POST',
@@ -107,14 +117,23 @@ function validatePayload(body) {
   const city  = (body.city      || '').trim();
   const state = (body.state     || '').trim();
 
-  if (name.length < 2)
-    return 'Full name must be at least 2 characters.';
+  // Full name: min 4 chars, no digits, not all-same chars
+  if (name.length < 4)
+    return 'Full name must be at least 4 characters.';
+  if (/\d/.test(name))
+    return 'Full name cannot contain numbers.';
+  if (!/[a-zA-Z\u0900-\u097F]/.test(name))
+    return 'Please enter a valid name.';
+  if (/^(.)\1+$/.test(name.replace(/\s/g, '')))
+    return 'Please enter your real full name.';
 
+  // Phone: 10 digits, starts 5-9, not all same digit
   if (!/^\d{10}$/.test(phone))
     return 'Phone must be exactly 10 digits.';
-
   if (/^[0-4]/.test(phone))
     return 'Phone must be a valid Indian mobile number (starts with 5–9).';
+  if (/^(\d)\1{9}$/.test(phone))
+    return 'Please enter a real mobile number.';
 
   if (!/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/.test(email))
     return 'Invalid email address.';
@@ -124,8 +143,15 @@ function validatePayload(body) {
   if (dummyEmails.includes(email))
     return 'Please use a real email address.';
 
-  if (co.length < 2)
-    return 'Company name must be at least 2 characters.';
+  // Company: min 3 chars, has letters, not a fake name
+  if (co.length < 3)
+    return 'Company name must be at least 3 characters.';
+  if (!/[a-zA-Z]/.test(co))
+    return 'Company name must contain letters.';
+  const fakeCompanies = ['abc','xyz','test','asdf','qwerty','company','mycompany','na','n/a','none','nil','abcd','aaa','bbb','ccc','xxx','yyy','zzz','temp','fake'];
+  const coKey = co.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (fakeCompanies.includes(coKey) || /^(.)\1+$/.test(coKey))
+    return 'Please enter your actual company name.';
 
   if (city.length < 2)
     return 'City must be at least 2 characters.';
@@ -204,7 +230,7 @@ async function handleVisitorUpsert(req, res, sheetId, token, body) {
     return res.status(400).json({ success: false, error: 'Missing visitor_id' });
   }
 
-  const now = new Date().toISOString();
+  const now = nowIST();
 
   // Read existing Visitors sheet
   const getUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/Visitors!A:F`;
@@ -266,11 +292,16 @@ async function appendNewVisitor(sheetId, token, body, visitorId, now) {
     1,                                // visit_count
     (body.user_agent || '').substring(0, 200),
     (body.referrer   || 'direct').substring(0, 200),
+    body.utm_source   || '',
+    body.utm_medium   || '',
+    body.utm_campaign || '',
+    body.utm_term     || '',
+    body.utm_content  || '',
   ];
 
   const appendUrl =
     `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/` +
-    `Visitors!A:F:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+    `Visitors!A:K:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
 
   const appendRes = await fetch(appendUrl, {
     method  : 'POST',
@@ -282,6 +313,28 @@ async function appendNewVisitor(sheetId, token, body, visitorId, now) {
     const errText = await appendRes.text();
     throw new Error(`Visitor append error: ${appendRes.status} — ${errText}`);
   }
+}
+
+
+/* ── IST TIMESTAMP HELPER ────────────────────────────────────────────
+   Returns current date-time as a human-readable string in IST (UTC+5:30).
+   Format: DD/MM/YYYY HH:MM:SS  e.g. "07/06/2025 14:35:22"
+   Stored as plain text (RAW mode) so Sheets won't reformat it.
+────────────────────────────────────────────────────────────────────── */
+function nowIST() {
+  const now = new Date();
+  // IST = UTC + 5 hours 30 minutes
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const ist = new Date(now.getTime() + istOffset);
+
+  const dd   = String(ist.getUTCDate()).padStart(2, '0');
+  const mm   = String(ist.getUTCMonth() + 1).padStart(2, '0');
+  const yyyy = ist.getUTCFullYear();
+  const HH   = String(ist.getUTCHours()).padStart(2, '0');
+  const MM   = String(ist.getUTCMinutes()).padStart(2, '0');
+  const SS   = String(ist.getUTCSeconds()).padStart(2, '0');
+
+  return `${dd}/${mm}/${yyyy} ${HH}:${MM}:${SS}`;
 }
 
 
