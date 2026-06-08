@@ -594,6 +594,26 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--text);
 /* ─── CONFIG ─────────────────────────────────────────────────────── */
 const SUBMIT_API = '/api/submit';
 
+/* ─── UTM PARAMS ─────────────────────────────────────────────────────
+   Reads UTM parameters from the URL once and stores them in
+   sessionStorage so they persist through redirects on the same tab.
+   Falls back gracefully if sessionStorage is blocked.
+────────────────────────────────────────────────────────────────────── */
+var _utms = (function() {
+  var keys = ['utm_source','utm_medium','utm_campaign','utm_term','utm_content'];
+  var stored;
+  try { stored = JSON.parse(sessionStorage.getItem('jd_utms') || 'null'); } catch(e) {}
+  var params = new URLSearchParams(window.location.search);
+  var fresh = {};
+  keys.forEach(function(k) { if (params.get(k)) fresh[k] = params.get(k); });
+  // If URL has fresh UTMs, overwrite stored ones
+  if (Object.keys(fresh).length) {
+    try { sessionStorage.setItem('jd_utms', JSON.stringify(fresh)); } catch(e) {}
+    return fresh;
+  }
+  return stored || {};
+})();
+
 /* ─── VISITOR UUID ───────────────────────────────────────────────────
    Generates a UUID once and persists it in localStorage so returning
    visitors can be identified across sessions. The backend uses this to
@@ -631,7 +651,7 @@ function sendEvent(eventType, extra) {
   var data = {
     event      : eventType,
     visitor_id : _visitorId,
-    timestamp  : new Date().toISOString(),
+    timestamp  : nowIST(),
     page       : window.location.href,
     referrer   : document.referrer || 'direct',
     userAgent  : navigator.userAgent,
@@ -654,10 +674,15 @@ function sendEvent(eventType, extra) {
     method  : 'POST',
     headers : { 'Content-Type': 'application/json' },
     body    : JSON.stringify({
-      visitor_id : _visitorId,
-      user_agent : navigator.userAgent,
-      referrer   : document.referrer || 'direct',
-      page       : window.location.href
+      visitor_id   : _visitorId,
+      user_agent   : navigator.userAgent,
+      referrer     : document.referrer || 'direct',
+      page         : window.location.href,
+      utm_source   : _utms.utm_source   || '',
+      utm_medium   : _utms.utm_medium   || '',
+      utm_campaign : _utms.utm_campaign || '',
+      utm_term     : _utms.utm_term     || '',
+      utm_content  : _utms.utm_content  || ''
     })
   }).catch(function() {}); // silent — never block the page
 })();
@@ -712,6 +737,108 @@ function updateCountdown(){
 }
 updateCountdown();setInterval(updateCountdown,1000);
 
+/* ─── IST TIMESTAMP ──────────────────────────────────────────────── */
+function nowIST() {
+  var now = new Date();
+  var ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+  var dd  = String(ist.getUTCDate()).padStart(2,'0');
+  var mm  = String(ist.getUTCMonth()+1).padStart(2,'0');
+  var yyyy= ist.getUTCFullYear();
+  var HH  = String(ist.getUTCHours()).padStart(2,'0');
+  var MM  = String(ist.getUTCMinutes()).padStart(2,'0');
+  var SS  = String(ist.getUTCSeconds()).padStart(2,'0');
+  return dd+'/'+mm+'/'+yyyy+' '+HH+':'+MM+':'+SS;
+}
+
+/* ─── CITY → STATE AUTO-SELECT ───────────────────────────────────── */
+// Maps common Indian cities to their state — covers most tier-1/2/3 cities
+var _cityStateMap = {
+  // Maharashtra
+  'mumbai':'Maharashtra','pune':'Maharashtra','nagpur':'Maharashtra','nashik':'Maharashtra',
+  'aurangabad':'Maharashtra','solapur':'Maharashtra','thane':'Maharashtra','kolhapur':'Maharashtra',
+  'navi mumbai':'Maharashtra','amravati':'Maharashtra','satara':'Maharashtra','ratnagiri':'Maharashtra',
+  // Delhi / NCR
+  'delhi':'Delhi','new delhi':'Delhi','noida':'Uttar Pradesh','gurgaon':'Haryana',
+  'gurugram':'Haryana','faridabad':'Haryana','ghaziabad':'Uttar Pradesh',
+  // Uttar Pradesh
+  'lucknow':'Uttar Pradesh','kanpur':'Uttar Pradesh','agra':'Uttar Pradesh',
+  'varanasi':'Uttar Pradesh','allahabad':'Uttar Pradesh','prayagraj':'Uttar Pradesh',
+  'meerut':'Uttar Pradesh','bareilly':'Uttar Pradesh','aligarh':'Uttar Pradesh',
+  'moradabad':'Uttar Pradesh','mathura':'Uttar Pradesh','firozabad':'Uttar Pradesh',
+  // Gujarat
+  'ahmedabad':'Gujarat','surat':'Gujarat','vadodara':'Gujarat','rajkot':'Gujarat',
+  'gandhinagar':'Gujarat','bhavnagar':'Gujarat','jamnagar':'Gujarat','anand':'Gujarat',
+  'bharuch':'Gujarat','morbi':'Gujarat',
+  // Karnataka
+  'bangalore':'Karnataka','bengaluru':'Karnataka','mysore':'Karnataka','mysuru':'Karnataka',
+  'mangalore':'Karnataka','hubli':'Karnataka','dharwad':'Karnataka','belgaum':'Karnataka',
+  'bellary':'Karnataka','gulbarga':'Karnataka',
+  // Tamil Nadu
+  'chennai':'Tamil Nadu','coimbatore':'Tamil Nadu','madurai':'Tamil Nadu','tiruchirappalli':'Tamil Nadu',
+  'trichy':'Tamil Nadu','salem':'Tamil Nadu','tirunelveli':'Tamil Nadu','tirupur':'Tamil Nadu',
+  'vellore':'Tamil Nadu','erode':'Tamil Nadu',
+  // Rajasthan
+  'jaipur':'Rajasthan','jodhpur':'Rajasthan','udaipur':'Rajasthan','kota':'Rajasthan',
+  'bikaner':'Rajasthan','ajmer':'Rajasthan','alwar':'Rajasthan','bhilwara':'Rajasthan',
+  'sikar':'Rajasthan','sriganganagar':'Rajasthan',
+  // West Bengal
+  'kolkata':'West Bengal','howrah':'West Bengal','durgapur':'West Bengal','asansol':'West Bengal',
+  'siliguri':'West Bengal','bardhaman':'West Bengal',
+  // Telangana
+  'hyderabad':'Telangana','secunderabad':'Telangana','warangal':'Telangana',
+  'karimnagar':'Telangana','nizamabad':'Telangana',
+  // Andhra Pradesh
+  'visakhapatnam':'Andhra Pradesh','vizag':'Andhra Pradesh','vijayawada':'Andhra Pradesh',
+  'guntur':'Andhra Pradesh','nellore':'Andhra Pradesh','tirupati':'Andhra Pradesh',
+  'kurnool':'Andhra Pradesh','rajahmundry':'Andhra Pradesh',
+  // Kerala
+  'kochi':'Kerala','thiruvananthapuram':'Kerala','trivandrum':'Kerala','kozhikode':'Kerala',
+  'calicut':'Kerala','thrissur':'Kerala','kollam':'Kerala','kannur':'Kerala','palakkad':'Kerala',
+  // Madhya Pradesh
+  'bhopal':'Madhya Pradesh','indore':'Madhya Pradesh','gwalior':'Madhya Pradesh',
+  'jabalpur':'Madhya Pradesh','ujjain':'Madhya Pradesh','sagar':'Madhya Pradesh',
+  // Punjab
+  'chandigarh':'Chandigarh','ludhiana':'Punjab','amritsar':'Punjab','jalandhar':'Punjab',
+  'patiala':'Punjab','bathinda':'Punjab','mohali':'Punjab',
+  // Haryana
+  'ambala':'Haryana','hisar':'Haryana','rohtak':'Haryana','panipat':'Haryana','karnal':'Haryana',
+  // Bihar
+  'patna':'Bihar','gaya':'Bihar','bhagalpur':'Bihar','muzaffarpur':'Bihar','darbhanga':'Bihar',
+  // Jharkhand
+  'ranchi':'Jharkhand','jamshedpur':'Jharkhand','dhanbad':'Jharkhand','bokaro':'Jharkhand',
+  // Odisha
+  'bhubaneswar':'Odisha','cuttack':'Odisha','rourkela':'Odisha','puri':'Odisha',
+  // Assam
+  'guwahati':'Assam','dibrugarh':'Assam','silchar':'Assam','jorhat':'Assam',
+  // Chhattisgarh
+  'raipur':'Chhattisgarh','bilaspur':'Chhattisgarh','durg':'Chhattisgarh',
+  // Himachal Pradesh
+  'shimla':'Himachal Pradesh','manali':'Himachal Pradesh','dharamshala':'Himachal Pradesh',
+  // Uttarakhand
+  'dehradun':'Uttarakhand','haridwar':'Uttarakhand','roorkee':'Uttarakhand','nainital':'Uttarakhand',
+  // Goa
+  'panaji':'Goa','margao':'Goa','vasco':'Goa',
+  // Manipur
+  'imphal':'Manipur',
+  // Meghalaya
+  'shillong':'Meghalaya',
+};
+
+function autoSelectState(cityVal) {
+  var key = cityVal.trim().toLowerCase();
+  if (!key) return;
+  var matched = _cityStateMap[key];
+  if (!matched) return;
+  var sel = document.getElementById('state');
+  for (var i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].value === matched || sel.options[i].text === matched) {
+      sel.value = sel.options[i].value;
+      setErr('state', ''); // clear any state error
+      break;
+    }
+  }
+}
+
 /* ─── VALIDATION ─────────────────────────────────────────────────── */
 function setErr(wrapperId, msg){
   const wrap = document.getElementById('f-'+wrapperId);
@@ -724,11 +851,16 @@ function setErr(wrapperId, msg){
 // Dummy/test email addresses to reject at the frontend
 var _dummyEmails = ['test@test.com','abc@abc.com','test@gmail.com','dummy@dummy.com','example@example.com','asdf@asdf.com'];
 
+// Fake / unrealistic company names to reject
+var _fakeCompanies = ['abc','xyz','test','asdf','qwerty','company','mycompany','na','n/a','none','nil','abcd','aaa','bbb','ccc','xxx','yyy','zzz','temp','fake'];
+
 const V = {
   fullName : function(v) {
     var t = v.trim();
-    if (t.length < 2)         return 'Please enter your full name (min 2 chars).';
-    if (/^\d+$/.test(t))      return 'Name cannot be all numbers.';
+    if (t.length < 4)                    return 'Please enter your full name (min 4 characters).';
+    if (/\d/.test(t))                    return 'Name cannot contain numbers.';
+    if (!/[a-zA-Z\u0900-\u097F]/.test(t)) return 'Please enter a valid name.';
+    if (/^(.)\1+$/.test(t.replace(/\s/g,''))) return 'Please enter your real full name.';
     return '';
   },
   phone    : function(v) {
@@ -736,6 +868,7 @@ const V = {
     if (!/^\d+$/.test(d))    return 'Only digits allowed.';
     if (d.length !== 10)      return 'Phone must be exactly 10 digits.';
     if (/^[0-4]/.test(d))    return 'Enter a valid Indian mobile number.';
+    if (/^(\d)\1{9}$/.test(d)) return 'Enter a real mobile number.';
     return '';
   },
   email    : function(v) {
@@ -744,7 +877,14 @@ const V = {
     if (_dummyEmails.indexOf(t) !== -1)               return 'Please use a real email address.';
     return '';
   },
-  company  : function(v) { return v.trim().length < 2 ? 'Please enter your company name.' : ''; },
+  company  : function(v) {
+    var t = v.trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+    if (v.trim().length < 3)              return 'Please enter your company name (min 3 characters).';
+    if (_fakeCompanies.indexOf(t) !== -1) return 'Please enter your actual company name.';
+    if (/^(.)\1+$/.test(t))              return 'Please enter a realistic company name.';
+    if (!/[a-zA-Z]/.test(v))             return 'Company name must contain letters.';
+    return '';
+  },
   city     : function(v) { return v.trim().length < 2 ? 'Enter your city.' : ''; },
   state    : function(v) { return v === '' ? 'Please select your state.' : ''; },
   visitorType : function(v) { return v === '' ? 'Please select your visitor type.' : ''; },
@@ -755,11 +895,26 @@ document.getElementById('phone').addEventListener('input', function(){
   setErr('phone', V.phone(this.value));
 });
 
+// Block non-alpha characters from being typed into fullName
+document.getElementById('fullName').addEventListener('keypress', function(e){
+  // Allow letters (any language), spaces, hyphens, apostrophes, dots
+  var ch = String.fromCharCode(e.which || e.keyCode);
+  if (/[0-9]/.test(ch)) { e.preventDefault(); }
+});
+
 ['fullName','email','company','city'].forEach(function(id){
   const el=document.getElementById(id);
   if(!el) return;
   el.addEventListener('input', function(){ if(el.value.trim().length>0) setErr(id, V[id](el.value)); else setErr(id,''); });
   el.addEventListener('blur',  function(){ if(el.value.trim().length>0) setErr(id, V[id](el.value)); });
+});
+
+// City → State auto-select
+document.getElementById('city').addEventListener('blur', function(){
+  autoSelectState(this.value);
+});
+document.getElementById('city').addEventListener('input', function(){
+  autoSelectState(this.value);
 });
 
 document.getElementById('state').addEventListener('change',function(){
@@ -796,19 +951,24 @@ document.getElementById('regForm').addEventListener('submit', function(e){
   }
 
   const payload = {
-    visitorType : document.getElementById('visitorType').value,
-    fullName    : name.trim(),
-    phone       : '+91' + phone.trim(),
-    email       : email.trim().toLowerCase(),
-    company     : company.trim(),
-    designation : document.getElementById('designation').value.trim(),
-    sector      : document.getElementById('sector').value,
-    city        : city.trim(),
-    state       : state,
-    interest    : document.getElementById('interest').value,
-    consent     : document.getElementById('consent').checked ? 'Yes' : 'No',
-    submittedAt : new Date().toISOString(),
-    source      : window.location.href
+    visitorType  : document.getElementById('visitorType').value,
+    fullName     : name.trim(),
+    phone        : '+91' + phone.trim(),
+    email        : email.trim().toLowerCase(),
+    company      : company.trim(),
+    designation  : document.getElementById('designation').value.trim(),
+    sector       : document.getElementById('sector').value,
+    city         : city.trim(),
+    state        : state,
+    interest     : document.getElementById('interest').value,
+    consent      : document.getElementById('consent').checked ? 'Yes' : 'No',
+    submittedAt  : nowIST(),
+    source       : window.location.href,
+    utm_source   : _utms.utm_source   || '',
+    utm_medium   : _utms.utm_medium   || '',
+    utm_campaign : _utms.utm_campaign || '',
+    utm_term     : _utms.utm_term     || '',
+    utm_content  : _utms.utm_content  || ''
   };
 
   const btn = document.querySelector('.btn-sub');
@@ -834,7 +994,8 @@ document.getElementById('regForm').addEventListener('submit', function(e){
     .catch(function(err){
       btn.disabled = false;
       btn.innerHTML = 'Register Now &nbsp;<span class="barrow">&#8594;</span>';
-      alert('Submission failed: ' + err.message + '\nPlease try again.');
+      var errBanner = document.getElementById('submitErrBanner');
+      if (errBanner) { errBanner.style.display = 'flex'; setTimeout(function(){ errBanner.style.display = 'none'; }, 6000); }
     });
 });
 
